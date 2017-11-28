@@ -119,6 +119,79 @@ Aktuelle Informationen sind im
 `Forum <https://community.contao.org/de/showthread.php?59961-MetaModels-aktualisieren-%28von-Nightly-Build-zu-Composer%29>`_
 zu finden.
 
+
+Update von File-Attributen beim Umstieg von MetaModels 1.x auf MetaModels 2.x
+--------------------------------------------------------------------------
+
+Wer den Umstieg von Contao 2.x / MetaModels 1.x auf Contao 3.x / MetaModels 2.x noch nicht erledigt hat,
+sieht sich mit dem Problem konfrontiert, dass nach einem erfolgreichen Update eingebundene Bilder oder Dateien
+nicht im Frontend angezeigt werden. Dies liegt daran, dass die entsprechenden Felder in der Datenbank
+noch vom Typ text sind (Contao 2.x / MetaModels 1.x), für Contao 3.x / MetaModels 2.x aber vom Typ blob sein müssen.
+Zudem müssen die als Text abgelegten Verweise auf Dateien oder Ordner in die entsprechenden UUIDs umgewandelt werden.
+
+Die folgende Anleitung beschreibt, wie man File-Felder aktualisiert, bei denen entweder Einzeldateien oder Ordner
+als Ziele verlinkt sind. Als Beispiel dient eine Installation mit einer Tabelle **mm_movies** und darin den beiden Spalten
+**image** (Einzeldatei) und **assets** (Ordner), die jeweils aktualisieren aktualisiert werden sollen.
+
+
+Erste Schritte
+..............
+
+* Ein **Backup** von Filesystem und Datenbank sollte man in jedem Fall vor den folgenden Operationen angelegt haben.
+
+* **Contao updaten**, bspw. nach dieser Anleitung: `Update Contao von 2.11 auf 3.5 <https://community.contao.org/de/showthread.php?59748-Update-von-2-11-auf-3-5-Schritt-f%C3%BCr-Schritt>`_
+  - dabei darauf achten, dass beim Update der Datenbank die MM-Tabellen nicht entfernt werden.
+
+* **MM updaten:** Zunächst sind alle MM-Ordner unter */system/modules/* zu löschen. Anschließend stellt man
+  die Erweiterungsverwaltung auf Composer um und installiert die aktuelle MM-Version, bspw. komplett über das Paket *metamodels/bundle_all*.
+  Nach der Aktualisierung der Datenbank sollte MetaModels 2.x im Backend wie gewohnt zur Verfügung stehen.
+
+* **Dateiverwaltung:** Sofern noch nicht geschehen, sollte in der Dateiverwaltung die Funktion "Synchronisieren" aufgerufen werden,
+  um die vorhandenen Dateien mit der Datenbank zu synchronisieren.
+
+
+
+Datenbank-Felder für Einzel-Auswahlen aktualisieren
+...................................................
+* In MetaModels ruft man zunächst das entsprechende File-Attribute auf und aktualisiert bzw. korrigiert dort die Angaben für den Wurzelordner auf die Angabe vor dem Update.
+* Die Datenbank in phpMyAdmin oder einem vergleichbaren Tool öffnen und die Strukturansicht des MetaModels aufrufen (*/mm_movies/*).
+* Danach in dieser Tabelle eine Backup-Spalte der entsprechende File-Spalte erstellen, indem der Tabelle eine neue Spalte hinzugefügt wird. Mit der folgenden SQL-Anweisung werden dann die Werte der Spalte image in die Spalte image_backup kopiert:
+  ``update mm_movies set image_backup=image``
+
+* Der Typ der Spalte des File-Attributs muss dann zu /*blob*/ geändert werden:
+  ``ALTER TABLE `mm_movies` CHANGE `image` `image` BLOB NULL DEFAULT NULL;``
+
+* Nun werden mit dem folgenden Befehl die UUID der betreffenden Dateien in die entsprechenden Felder eingefügt:
+  ``UPDATE mm_movies SET image=(SELECT uuid FROM `tl_files` WHERE tl_files.path=mm_movies.image_backup)``
+
+* Nach dem erfolgreichem Update kann die Backupspalte gelöscht werden.
+
+
+Datenbank-Felder für Ordner-Auswahlen aktualisieren
+...................................................
+
+* In MetaModels ruft man zunächst das entsprechende File-Attribute auf und aktualisiert bzw. korrigiert dort die Angaben für den Wurzelordner auf die Angabe vor dem Update.
+
+* Auch in dieser Tabelle eine Backup-Spalte der entsprechende File-Spalte erstellen, indem der Tabelle eine neue Spalte hinzugefügt wird. Mit der folgenden SQL-Anweisung werden dann die Werte der Spalte image in die Spalte image_backup kopiert:
+  ``update mm_movie set assets_backup=assets``
+
+* Den Typ der Spalte des File-Attributs zu blob ändern:
+  ``ALTER TABLE `mm_movies` CHANGE `assets` `assets` BLOB NULL DEFAULT NULL;``
+
+* Nun sucht man in der Spalte /*backup_assets*/ die ersten fünfzehn Zeichen (inkl. Anführungszeichen, bis zum Beginn des Pfads zum entsprechenden Ordner) heraus. Diese sehen in etwa so aus: **a:1:{i:0;s:83:"**
+
+* Der nachfolgende SQL-Befehl muss jetzt so angepasst werden, dass der fett markierte Teil den eigenen Werten entspricht:
+
+.. code-block:: php
+   :linenos:
+
+   UPDATE mm_movies SET assets=CONCAT(**'a:1:{i:0;s:83:"**', (SELECT uuid FROM tl_files
+   WHERE path=SUBSTRING(assets_backup, 16, LENGTH(assets_backup)-16-2)), '";}')
+   WHERE (SELECT uuid FROM tl_files WHERE path=SUBSTRING(assets_backup, 16, LENGTH(assets_backup)-16-2)) IS NOT NULL
+
+* Anschließend sollten auch die Verweise auf Ordner wieder korrekt funktionieren.
+
+* Nach dem erfolgreichem Update kann die Backupspalte gelöscht werden.
 .. |br| raw:: html
 
    <br />
